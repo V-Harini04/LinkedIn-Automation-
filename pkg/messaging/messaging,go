@@ -1,0 +1,131 @@
+package main
+
+import (
+	"context"
+	"log"
+	"math/rand"
+	"time"
+
+	"first/pkg/auth"
+	"first/pkg/connect"
+	"first/pkg/messaging"
+	"first/pkg/search"
+	"first/pkg/stealth"
+	"first/state"
+
+	"github.com/chromedp/chromedp"
+)
+
+func main() {
+
+	// 🔐 AUTHENTICATION
+	if err := auth.Authenticate(); err != nil {
+		log.Fatal("Authentication failed:", err)
+	}
+
+	log.Println("Starting browser automation...")
+	rand.Seed(time.Now().UnixNano())
+
+	// 🧠 Chrome allocator (anti‑bot friendly)
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.Flag("headless", false),
+		chromedp.Flag("disable-blink-features", "AutomationControlled"),
+		chromedp.NoFirstRun,
+		chromedp.NoDefaultBrowserCheck,
+	)
+
+	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	defer allocCancel()
+
+	// 🌐 Browser context
+	ctx, cancel := chromedp.NewContext(allocCtx)
+	defer cancel()
+
+	// ⏱ Timeout guard
+	ctx, cancel = context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+
+	// 🔹 Open safe page
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate("about:blank"),
+	); err != nil {
+		log.Fatal(err)
+	}
+
+	// 🕵️ Fingerprint masking
+	if err := stealth.ApplyFingerprintMask(ctx); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Browser fingerprint masking applied")
+
+	// 🔍 SEARCH + TARGETING
+	results, err := search.SearchAndCollect(ctx, "golang developer linkedin")
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Collected %d profile URLs\n", len(results))
+
+	// 💾 SAVE SEARCH RESULTS
+	appState, _ := state.LoadState()
+	appState.CollectedURLs = appendUnique(appState.CollectedURLs, results...)
+	state.SaveState(appState)
+
+	// 🤝 SEND CONNECTION REQUESTS
+	if err := connect.SendConnectionRequests(ctx, 3); err != nil {
+		log.Fatal(err)
+	}
+
+	// ✉️ SEND MESSAGES (ONLY TO CONNECTED USERS)
+	messageTemplate := "Hi! I came across your profile and would love to connect and exchange ideas."
+
+	if err := messaging.SendMessages(ctx, appState.SentConnections, messageTemplate); err != nil {
+		log.Fatal(err)
+	}
+
+	// 🧪 HUMAN BEHAVIOR (final stealth layer)
+	if err := stealth.HumanMouseMove(ctx); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Human mouse movement completed")
+
+	if err := stealth.SimpleScroll(ctx); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Stealth scrolling completed")
+
+	// 🧪 Typing simulation (demo input)
+	if err := chromedp.Run(ctx,
+		chromedp.Evaluate(`
+			if (!document.getElementById("test-input")) {
+				const input = document.createElement("input");
+				input.id = "test-input";
+				input.style.margin = "40px";
+				document.body.appendChild(input);
+			}
+		`, nil),
+	); err != nil {
+		log.Fatal(err)
+	}
+
+	if err := stealth.HumanType(ctx, "#test-input", "Hello, this is human typing"); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Human typing completed")
+
+	log.Println("END OF MAIN REACHED — EXITING")
+}
+
+// ✅ Prevent duplicate URLs
+func appendUnique(existing []string, incoming ...string) []string {
+	seen := make(map[string]bool)
+	for _, v := range existing {
+		seen[v] = true
+	}
+	for _, v := range incoming {
+		if !seen[v] {
+			existing = append(existing, v)
+			seen[v] = true
+		}
+	}
+	return existing
+}
